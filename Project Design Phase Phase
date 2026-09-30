@@ -1,1 +1,364 @@
 Project Design Phase Phase
+# ComicCraft — Project Design Phase
+
+ The **Design Phase** defines how ComicCraft will look, how users will interact with it, and how the Gemini-powered components will work together.
+
+ ## 1\. Design Objectives
+
+ The design of ComicCraft should be:
+
+ - **Simple** — beginners should be able to create comics without technical knowledge.
+- **Interactive** — users should be able to edit and regenerate AI content.
+- **Creative** — the interface should encourage experimentation.
+- **Consistent** — characters and story elements should remain coherent across panels.
+- **AI-assisted** — Gemini should support the creator rather than completely replace their creative decisions.
+
+ ## 2\. Overall System Design
+
+```
+┌──────────────────────────────┐
+│          User Interface      │
+│      ComicCraft Web App      │
+└──────────────┬───────────────┘
+               │
+               ▼
+┌──────────────────────────────┐
+│       Application Layer      │
+│ Story | Character | Panel    │
+│ Dialogue | Project Manager   │
+└──────────────┬───────────────┘
+               │
+               ▼
+┌──────────────────────────────┐
+│       Gemini AI Layer        │
+│ Story Generation             │
+│ Character Generation         │
+│ Scene & Dialogue Generation  │
+│ Prompt Generation            │
+└──────────────┬───────────────┘
+               │
+               ▼
+┌──────────────────────────────┐
+│       Data / Storage Layer   │
+│ Projects | Characters       │
+│ Stories | Panels | Settings │
+└──────────────────────────────┘
+```
+
+ ## 3\. User Interface Design
+
+ ### Home Page
+
+ The home page introduces ComicCraft and provides access to existing projects.
+
+ **Elements:**
+
+ - ComicCraft logo
+- New Comic button
+- Recent projects
+- Templates
+- Help/settings
+
+ Example:
+
+```
+┌─────────────────────────────────────────────┐
+│ COMICCRAFT                    Projects ⚙   │
+├─────────────────────────────────────────────┤
+│                                             │
+│        Turn Your Ideas Into Comics          │
+│                                             │
+│       [ + Create New Comic ]                │
+│                                             │
+│ Recent Projects                             │
+│ ┌───────────┐ ┌───────────┐ ┌───────────┐  │
+│ │ Magic Pen │ │ Robot Chef│ │ Space     │  │
+│ │           │ │           │ │ Adventure │  │
+│ └───────────┘ └───────────┘ └───────────┘  │
+└─────────────────────────────────────────────┘
+```
+
+ ## 4\. Comic Creation Interface
+
+ The creation screen can use a step-by-step workflow:
+
+```
+Idea
+ ↓
+Story
+ ↓
+Characters
+ ↓
+Scenes
+ ↓
+Panels
+ ↓
+Preview
+```
+
+ A progress indicator at the top helps users understand where they are.
+
+ ## 5\. Story Design
+
+ The user enters a basic idea.
+
+ **Input:**
+
+ > "A teenager discovers a robot hidden inside an abandoned laboratory."
+
+ The system provides:
+
+ - Title
+- Genre
+- Setting
+- Main conflict
+- Beginning
+- Middle
+- Ending
+
+ Users can select:
+
+ - **Accept**
+- **Edit**
+- **Regenerate**
+
+ ## 6\. Character Design
+
+ ComicCraft generates structured character cards.
+
+```
+┌──────────────────────────┐
+│        CHARACTER         │
+├──────────────────────────┤
+│ Name: Alex               │
+│ Age: 17                  │
+│ Role: Protagonist        │
+│                          │
+│ Personality:             │
+│ Curious, brave, creative │
+│                          │
+│ Appearance:              │
+│ Short black hair,        │
+│ blue jacket, backpack    │
+│                          │
+│ [ Edit ] [ Regenerate ]  │
+└──────────────────────────┘
+```
+
+ Character information should be stored as part of the project so it can be reused when generating later scenes.
+
+ ## 7\. Scene Design
+
+ Each story can be divided into scenes.
+
+```
+Scene 1
+↓
+Laboratory Entrance
+
+Scene 2
+↓
+Discovery of the Robot
+
+Scene 3
+↓
+Robot Awakens
+
+Scene 4
+↓
+The Escape
+
+Scene 5
+↓
+Final Conflict
+```
+
+ Each scene contains:
+
+ - Location
+- Time
+- Characters
+- Action
+- Mood
+- Dialogue
+- Panel requirements
+
+ ## 8\. Comic Panel Design
+
+ The panel editor is the central part of ComicCraft.
+
+```
+┌────────────────────────────────────┐
+│ Page 1                             │
+├───────────────────┬────────────────┤
+│                   │                │
+│     PANEL 1       │    PANEL 2     │
+│                   │                │
+│  Alex enters      │ Finds robot    │
+│  laboratory       │                │
+│                   │                │
+├───────────────────┴────────────────┤
+│                                    │
+│             PANEL 3                │
+│                                    │
+│       Robot suddenly awakens       │
+│                                    │
+└────────────────────────────────────┘
+```
+
+ Users should be able to:
+
+ - Rearrange panels
+- Edit descriptions
+- Edit dialogue
+- Change panel size
+- Regenerate a panel
+- Add/remove panels
+
+ ## 9\. Dialogue Design
+
+ Dialogue should be associated with individual panels.
+
+ Example:
+
+ **Panel 3**
+
+ **Alex:**
+
+ > "You're... actually alive?"
+
+ **Robot:**
+
+ > "System reboot complete."
+
+ The user can request modifications such as:
+
+ > "Make the dialogue funnier."
+
+ or
+
+ > "Make the conversation more dramatic."
+
+ ## 10\. AI Interaction Design
+
+ Rather than giving users one large AI-generated result, ComicCraft should use smaller AI operations.
+
+```
+User Idea
+   ↓
+Gemini
+   ↓
+Story Structure
+   ↓
+Gemini
+   ↓
+Characters
+   ↓
+Gemini
+   ↓
+Scenes
+   ↓
+Gemini
+   ↓
+Panels + Dialogue
+```
+
+ This makes individual results easier to review and regenerate.
+
+ ## 11\. Data Design
+
+ A project can be represented conceptually as:
+
+```
+Project
+│
+├── Project Information
+│   ├── Title
+│   ├── Genre
+│   └── Style
+│
+├── Story
+│   ├── Premise
+│   ├── Beginning
+│   ├── Middle
+│   └── Ending
+│
+├── Characters
+│   ├── Character 1
+│   ├── Character 2
+│   └── Character 3
+│
+├── Scenes
+│   ├── Scene 1
+│   ├── Scene 2
+│   └── Scene 3
+│
+└── Comic Pages
+    ├── Page 1
+    ├── Page 2
+    └── Page 3
+```
+
+ ## 12\. Navigation Design
+
+ A sidebar can provide quick access to the project's components:
+
+```
+┌─────────────────┐
+│ COMICCRAFT      │
+├─────────────────┤
+│ 📖 Story        │
+│ 👤 Characters   │
+│ 🎬 Scenes       │
+│ 🖼 Panels       │
+│ 💬 Dialogue     │
+│ 👁 Preview      │
+│                 │
+│ ⚙ Settings      │
+└─────────────────┘
+```
+
+ ## 13\. Design Principles
+
+ The project should follow these principles:
+
+ - **Human-in-the-loop:** The creator controls the final story.
+- **Incremental generation:** Generate and refine one component at a time.
+- **Consistency:** Reuse character and story information across generations.
+- **Easy recovery:** Allow undo, editing, and regeneration.
+- **Visual feedback:** Show the comic structure clearly.
+- **Minimal complexity:** Avoid overwhelming first-time users.
+
+ ## 14\. Final Design Architecture
+
+```
+                         COMICCRAFT
+                             │
+                 ┌───────────┴───────────┐
+                 │                       │
+             USER UI                 PROJECT DATA
+                 │                       │
+       ┌─────────┼─────────┐             │
+       │         │         │             │
+     Story   Characters  Panels          │
+       │         │         │             │
+       └─────────┼─────────┘             │
+                 │                       │
+                 ▼                       │
+          GEMINI AI SERVICES             │
+                 │                       │
+       ┌─────────┼─────────┐             │
+       │         │         │             │
+     Story    Dialogue    Scene          │
+     AI         AI         AI            │
+       │         │         │             │
+       └─────────┼─────────┘             │
+                 │                       │
+                 └───────────┬───────────┘
+                             ▼
+                      FINAL COMIC
+```
+
+ ### Design Phase Outcome
+
+ At the end of the Design Phase, ComicCraft should have a clearly defined **UI structure, user workflow, AI interaction model, data structure, panel editor concept, and overall system architecture**. These designs can then be used as the foundation for the **development/implementation phase**.
