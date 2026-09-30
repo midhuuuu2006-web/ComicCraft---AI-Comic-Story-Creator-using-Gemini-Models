@@ -1,1 +1,210 @@
 Project Demonstration Phase
+## ComicCraft — Project Demonstration Phase
+
+ The **Project Demonstration Phase** focuses on showing how ComicCraft works from the user's initial idea to the final comic output.
+
+ ### 1\. Demonstration Objective
+
+ Demonstrate that ComicCraft can use **Gemini models** to transform a simple story idea into a structured comic by generating:
+
+ - Story concept
+- Characters
+- Plot
+- Scenes
+- Comic panels
+- Dialogue
+- Visual descriptions
+- Final comic layout
+
+ ### 2\. Demonstration Flow
+
+```
+User Input
+    ↓
+Enter Comic Idea
+    ↓
+Select Genre & Style
+    ↓
+Gemini Story Generation
+    ↓
+Character Generation
+    ↓
+Scene & Panel Generation
+    ↓
+Dialogue Generation
+    ↓
+Comic Preview
+    ↓
+Edit / Regenerate
+    ↓
+Final Comic
+```
+
+ ### 3\. Sample Demonstration
+
+ **User enters:**
+
+ > "A young girl discovers a magical pen that brings anything she draws to life."
+
+ **Selected options:**
+
+ - Genre: Fantasy / Adventure
+- Length: 5 pages
+- Audience: Teenagers
+- Style: Colorful comic
+
+ ### 4\. AI-Generated Story
+
+ **Title:** _The Magic Pen_
+
+ **Story concept:**\
+ Maya, a creative teenager who loves drawing, discovers an unusual pen in an old stationery shop. She soon realizes that everything she draws with the pen becomes real. At first, she uses it for fun, but her drawings eventually create a dangerous creature that she must stop.
+
+ ### 5\. Character Demonstration
+
+ **Maya**
+
+ - Age: 16
+- Personality: Creative, curious, adventurous
+- Role: Main protagonist
+
+ **Shadow Beast**
+
+ - Role: Antagonist
+- Appearance: Large mysterious creature made of dark ink
+- Personality: Aggressive and unpredictable
+
+ **Mr. Rao**
+
+ - Role: Mysterious shopkeeper
+- Personality: Wise and secretive
+
+ ### 6\. Scene-to-Panel Demonstration
+
+ **Page 1**
+
+ | Panel | Description | Dialogue |
+| --- | --- | --- |
+| 1 | Maya walks into an old stationery shop. | "I've never seen this place before." |
+| 2 | She notices a glowing pen. | "Whoa... what's this?" |
+| 3 | Maya draws a small butterfly. | "I wish this could fly." |
+| 4 | The drawing suddenly comes alive. | "Wait... WHAT?!" |
+
+**Page 2**
+
+ The butterfly flies around the room, demonstrating the pen's magical ability.
+
+ **Page 3**
+
+ Maya accidentally draws a large shadow creature.
+
+ **Page 4**
+
+ The creature escapes and causes chaos.
+
+ **Page 5**
+
+ Maya uses her creativity to draw something capable of defeating the creature.
+
+ ### 7\. Gemini Demonstration
+
+ The presentation can show Gemini being used at different stages:
+
+```
+                GEMINI
+                   │
+       ┌───────────┼───────────┐
+       ↓           ↓           ↓
+    Story      Characters    Scenes
+       │           │           │
+       └───────────┼───────────┘
+                   ↓
+                Dialogue
+                   ↓
+              Panel Prompts
+                   ↓
+             Comic Preview
+```
+
+ The important demonstration point is that **the user remains in control**. Generated content can be edited, regenerated, or refined rather than being treated as a fixed result.
+
+ ### 8\. UI Demonstration
+
+ A simple demo interface could contain:
+
+ **Home Screen**
+
+ > **ComicCraft**\
+>  _Turn your ideas into comics with AI_
+
+ `[ Create New Comic ]`
+
+---
+
+ **Story Creation Screen**
+
+ > **What's your comic about?**
+
+ `A girl discovers a magical pen...`
+
+ **Genre:** `Fantasy ▼`\
+ **Length:** `5 Pages ▼`\
+ **Style:** `Colorful ▼`
+
+ `[ Generate Story ]`
+
+---
+
+ **Generated Story Screen**
+
+ **The Magic Pen**
+
+ `[ Edit ]  [ Regenerate ]  [ Continue ]`
+
+ Sections:
+
+ - Story
+- Characters
+- Scenes
+- Dialogue
+
+---
+
+ **Comic Preview**
+
+```
+┌─────────────┬─────────────┐
+│   PANEL 1   │   PANEL 2   │
+│             │             │
+│ Maya enters │ Finds magic │
+│ the shop    │ pen         │
+├─────────────┼─────────────┤
+│   PANEL 3   │   PANEL 4   │
+│             │             │
+│ Butterfly   │ Shadow      │
+│ comes alive │ creature    │
+└─────────────┴─────────────┘
+```
+
+ ### 9\. Key Demonstration Features
+
+ During the project presentation, demonstrate these features in order:
+
+ 1. **Create a new comic**
+2. **Enter a story idea**
+3. **Generate the story using Gemini**
+4. **Show automatically generated characters**
+5. **Generate scenes and panels**
+6. **Generate dialogue**
+7. **Edit one generated section**
+8. **Regenerate the selected section**
+9. **Show the complete comic preview**
+10. **Export/share the final result**
+
+ ### 10\. Expected Demonstration Result
+
+ At the end of the demonstration, the audience should be able to see:
+
+ > **Simple Idea → AI Story → Characters → Scenes → Panels → Dialogue → Complete Comic**
+
+ This demonstrates ComicCraft's main value: **reducing the effort required to turn an idea into a structured comic while allowing the creator to control and edit the result.**
