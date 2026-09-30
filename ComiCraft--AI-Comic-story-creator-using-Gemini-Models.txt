@@ -1,0 +1,2984 @@
+// ============================================================
+// COMICCRAFT - ALL IN ONE FULL-STACK WEB APPLICATION
+// ============================================================
+// Run:
+//   npm init -y
+//   npm install express better-sqlite3 dotenv @google/generative-ai
+//
+// Create .env:
+//   GEMINI_API_KEY=your_api_key_here
+//
+// Start:
+//   node server.js
+//
+// Open:
+//   http://localhost:3000
+// ============================================================
+
+require("dotenv").config();
+
+const express = require("express");
+const Database = require("better-sqlite3");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// ------------------------------------------------------------
+// DATABASE
+// ------------------------------------------------------------
+
+const db = new Database("comiccraft.db");
+
+db.pragma("journal_mode = WAL");
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS projects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    genre TEXT,
+    idea TEXT,
+    style TEXT,
+    length TEXT,
+    story TEXT DEFAULT '',
+    characters TEXT DEFAULT '[]',
+    scenes TEXT DEFAULT '[]',
+    panels TEXT DEFAULT '[]',
+    dialogue TEXT DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+`);
+
+// ------------------------------------------------------------
+// GEMINI
+// ------------------------------------------------------------
+
+const genAI = process.env.GEMINI_API_KEY
+    ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
+    : null;
+
+async function askGemini(prompt) {
+    if (!genAI) {
+        throw new Error("GEMINI_API_KEY is not configured.");
+    }
+
+    const model = genAI.getGenerativeModel({
+        model: "gemini-2.0-flash"
+    });
+
+    const result = await model.generateContent(prompt);
+    return result.response.text();
+}
+
+function extractJSON(text) {
+    text = text.trim();
+
+    if (text.startsWith("```")) {
+        text = text.replace(/^```json/i, "");
+        text = text.replace(/^```/i, "");
+        text = text.replace(/```$/i, "");
+    }
+
+    const first = text.indexOf("{");
+    const last = text.lastIndexOf("}");
+
+    if (first !== -1 && last !== -1) {
+        return JSON.parse(text.substring(first, last + 1));
+    }
+
+    const arrayFirst = text.indexOf("[");
+    const arrayLast = text.lastIndexOf("]");
+
+    if (arrayFirst !== -1 && arrayLast !== -1) {
+        return JSON.parse(text.substring(arrayFirst, arrayLast + 1));
+    }
+
+    throw new Error("AI returned invalid JSON.");
+}
+
+// ------------------------------------------------------------
+// EXPRESS
+// ------------------------------------------------------------
+
+app.use(express.json({ limit: "5mb" }));
+
+// ------------------------------------------------------------
+// API - PROJECTS
+// ------------------------------------------------------------
+
+app.get("/api/projects", (req, res) => {
+    const projects = db.prepare(`
+        SELECT id, title, genre, style, length, created_at, updated_at
+        FROM projects
+        ORDER BY updated_at DESC
+    `).all();
+
+    res.json(projects);
+});
+
+app.get("/api/projects/:id", (req, res) => {
+    const project = db.prepare(`
+        SELECT * FROM projects WHERE id = ?
+    `).get(req.params.id);
+
+    if (!project) {
+        return res.status(404).json({
+            error: "Project not found"
+        });
+    }
+
+    project.characters = JSON.parse(project.characters || "[]");
+    project.scenes = JSON.parse(project.scenes || "[]");
+    project.panels = JSON.parse(project.panels || "[]");
+
+    res.json(project);
+});
+
+app.post("/api/projects", (req, res) => {
+    const {
+        title,
+        genre,
+        idea,
+        style,
+        length
+    } = req.body;
+
+    if (!title) {
+        return res.status(400).json({
+            error: "Project title is required."
+        });
+    }
+
+    const result = db.prepare(`
+        INSERT INTO projects
+        (title, genre, idea, style, length)
+        VALUES (?, ?, ?, ?, ?)
+    `).run(
+        title,
+        genre || "Adventure",
+        idea || "",
+        style || "Modern Comic",
+        length || "5 pages"
+    );
+
+    res.json({
+        id: result.lastInsertRowid
+    });
+});
+
+app.put("/api/projects/:id", (req, res) => {
+    const {
+        title,
+        genre,
+        idea,
+        style,
+        length,
+        story,
+        characters,
+        scenes,
+        panels,
+        dialogue
+    } = req.body;
+
+    db.prepare(`
+        UPDATE projects
+        SET
+            title = ?,
+            genre = ?,
+            idea = ?,
+            style = ?,
+            length = ?,
+            story = ?,
+            characters = ?,
+            scenes = ?,
+            panels = ?,
+            dialogue = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+    `).run(
+        title,
+        genre,
+        idea,
+        style,
+        length,
+        story || "",
+        JSON.stringify(characters || []),
+        JSON.stringify(scenes || []),
+        JSON.stringify(panels || []),
+        dialogue || "",
+        req.params.id
+    );
+
+    res.json({
+        success: true
+    });
+});
+
+app.delete("/api/projects/:id", (req, res) => {
+    db.prepare(`
+        DELETE FROM projects WHERE id = ?
+    `).run(req.params.id);
+
+    res.json({
+        success: true
+    });
+});
+
+// ------------------------------------------------------------
+// AI - STORY
+// ------------------------------------------------------------
+
+app.post("/api/generate/story", async (req, res) => {
+    try {
+        const {
+            idea,
+            genre,
+            style,
+            length
+        } = req.body;
+
+        const prompt = `
+You are a professional comic story writer.
+
+Create a structured comic story.
+
+Story idea:
+${idea}
+
+Genre:
+${genre}
+
+Comic style:
+${style}
+
+Length:
+${length}
+
+Return ONLY valid JSON in this format:
+
+{
+  "title": "",
+  "premise": "",
+  "setting": "",
+  "mainConflict": "",
+  "beginning": "",
+  "middle": "",
+  "ending": ""
+}
+
+Make the story creative, clear and suitable for a comic.
+`;
+
+        const answer = await askGemini(prompt);
+        const story = extractJSON(answer);
+
+        res.json(story);
+
+    } catch (error) {
+        console.error(error);
+
+        res.status(500).json({
+            error: error.message
+        });
+    }
+});
+
+// ------------------------------------------------------------
+// AI - CHARACTERS
+// ------------------------------------------------------------
+
+app.post("/api/generate/characters", async (req, res) => {
+    try {
+        const {
+            story,
+            genre
+        } = req.body;
+
+        const prompt = `
+Create comic characters based on this story.
+
+Genre:
+${genre}
+
+Story:
+${JSON.stringify(story)}
+
+Return ONLY a JSON array.
+
+Each character must contain:
+
+{
+  "name": "",
+  "age": "",
+  "role": "",
+  "appearance": "",
+  "personality": "",
+  "background": "",
+  "relationships": ""
+}
+
+Create 3 to 5 important characters.
+`;
+
+        const answer = await askGemini(prompt);
+        const characters = extractJSON(answer);
+
+        res.json(characters);
+
+    } catch (error) {
+        console.error(error);
+
+        res.status(500).json({
+            error: error.message
+        });
+    }
+});
+
+// ------------------------------------------------------------
+// AI - SCENES
+// ------------------------------------------------------------
+
+app.post("/api/generate/scenes", async (req, res) => {
+    try {
+        const {
+            story,
+            characters,
+            length
+        } = req.body;
+
+        const prompt = `
+Divide this comic story into logical scenes.
+
+Story:
+${JSON.stringify(story)}
+
+Characters:
+${JSON.stringify(characters)}
+
+Length:
+${length}
+
+Return ONLY a JSON array.
+
+Each scene must contain:
+
+{
+  "number": 1,
+  "location": "",
+  "characters": [],
+  "action": "",
+  "mood": "",
+  "purpose": "",
+  "description": ""
+}
+
+Create scenes suitable for a comic.
+`;
+
+        const answer = await askGemini(prompt);
+        const scenes = extractJSON(answer);
+
+        res.json(scenes);
+
+    } catch (error) {
+        console.error(error);
+
+        res.status(500).json({
+            error: error.message
+        });
+    }
+});
+
+// ------------------------------------------------------------
+// AI - PANELS
+// ------------------------------------------------------------
+
+app.post("/api/generate/panels", async (req, res) => {
+    try {
+        const {
+            story,
+            characters,
+            scenes,
+            style
+        } = req.body;
+
+        const prompt = `
+Convert the scenes of this comic into comic panels.
+
+Story:
+${JSON.stringify(story)}
+
+Characters:
+${JSON.stringify(characters)}
+
+Scenes:
+${JSON.stringify(scenes)}
+
+Comic style:
+${style}
+
+Return ONLY a JSON array.
+
+Each panel must contain:
+
+{
+  "number": 1,
+  "scene": 1,
+  "visualDescription": "",
+  "characters": [],
+  "background": "",
+  "action": "",
+  "expression": "",
+  "camera": "",
+  "caption": "",
+  "dialogue": "",
+  "visualPrompt": ""
+}
+
+Create clear comic-panel descriptions.
+`;
+
+        const answer = await askGemini(prompt);
+        const panels = extractJSON(answer);
+
+        res.json(panels);
+
+    } catch (error) {
+        console.error(error);
+
+        res.status(500).json({
+            error: error.message
+        });
+    }
+});
+
+// ------------------------------------------------------------
+// AI - DIALOGUE
+// ------------------------------------------------------------
+
+app.post("/api/generate/dialogue", async (req, res) => {
+    try {
+        const {
+            story,
+            characters,
+            scenes,
+            panels
+        } = req.body;
+
+        const prompt = `
+Write natural comic dialogue.
+
+Story:
+${JSON.stringify(story)}
+
+Characters:
+${JSON.stringify(characters)}
+
+Scenes:
+${JSON.stringify(scenes)}
+
+Panels:
+${JSON.stringify(panels)}
+
+Return ONLY valid JSON:
+
+{
+  "dialogue": [
+    {
+      "panel": 1,
+      "speaker": "",
+      "text": ""
+    }
+  ]
+}
+
+Keep dialogue short and suitable for comic speech bubbles.
+`;
+
+        const answer = await askGemini(prompt);
+        const dialogue = extractJSON(answer);
+
+        res.json(dialogue);
+
+    } catch (error) {
+        console.error(error);
+
+        res.status(500).json({
+            error: error.message
+        });
+    }
+});
+
+// ------------------------------------------------------------
+// FRONTEND
+// ------------------------------------------------------------
+
+app.get("/", (req, res) => {
+
+    res.send(`
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta name="viewport"
+      content="width=device-width, initial-scale=1.0">
+
+<title>ComicCraft - AI Comic Creator</title>
+
+<style>
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    font-family:
+        Inter,
+        Arial,
+        sans-serif;
+
+    background:
+        linear-gradient(
+            135deg,
+            #080b18,
+            #11152b
+        );
+
+    color: white;
+}
+
+button,
+input,
+textarea,
+select {
+    font: inherit;
+}
+
+button {
+    cursor: pointer;
+}
+
+.app {
+    min-height: 100vh;
+    display: flex;
+}
+
+/* SIDEBAR */
+
+.sidebar {
+    width: 260px;
+    min-height: 100vh;
+    background: rgba(7, 10, 25, .95);
+    border-right: 1px solid #252a45;
+    padding: 25px 18px;
+    position: fixed;
+    left: 0;
+    top: 0;
+}
+
+.logo {
+    font-size: 26px;
+    font-weight: 900;
+    margin-bottom: 35px;
+}
+
+.logo span {
+    color: #8b5cf6;
+}
+
+.nav-title {
+    font-size: 12px;
+    color: #7f879f;
+    margin: 20px 10px 10px;
+    text-transform: uppercase;
+}
+
+.nav button {
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: 0;
+    color: #aeb5c9;
+    padding: 13px;
+    border-radius: 10px;
+    margin-bottom: 5px;
+}
+
+.nav button:hover,
+.nav button.active {
+    background: #202642;
+    color: white;
+}
+
+.main {
+    margin-left: 260px;
+    width: calc(100% - 260px);
+    padding: 30px;
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 30px;
+}
+
+.header h1 {
+    margin: 0;
+    font-size: 32px;
+}
+
+.header p {
+    color: #8e96ad;
+    margin-top: 7px;
+}
+
+.btn {
+    border: 0;
+    padding: 12px 18px;
+    border-radius: 10px;
+    font-weight: 700;
+    transition: .2s;
+}
+
+.btn-primary {
+    background: #7c3aed;
+    color: white;
+}
+
+.btn-primary:hover {
+    background: #8b5cf6;
+    transform: translateY(-1px);
+}
+
+.btn-secondary {
+    background: #242a43;
+    color: white;
+}
+
+.btn-danger {
+    background: #ef4444;
+    color: white;
+}
+
+.btn-success {
+    background: #10b981;
+    color: white;
+}
+
+/* DASHBOARD */
+
+.hero {
+    background:
+        linear-gradient(
+            135deg,
+            #22154b,
+            #141b3b
+        );
+
+    border: 1px solid #39335d;
+    border-radius: 20px;
+    padding: 35px;
+    margin-bottom: 25px;
+}
+
+.hero h2 {
+    font-size: 30px;
+    margin: 0 0 10px;
+}
+
+.hero p {
+    color: #aeb5c9;
+    max-width: 650px;
+    line-height: 1.6;
+}
+
+.cards {
+    display: grid;
+    grid-template-columns:
+        repeat(
+            auto-fit,
+            minmax(200px, 1fr)
+        );
+
+    gap: 18px;
+}
+
+.card {
+    background: #151a30;
+    border: 1px solid #282f4b;
+    border-radius: 16px;
+    padding: 22px;
+}
+
+.card h3 {
+    margin-top: 0;
+}
+
+.card p {
+    color: #8992aa;
+    line-height: 1.5;
+}
+
+/* FORM */
+
+.form-card {
+    background: #151a30;
+    border: 1px solid #292f4a;
+    border-radius: 18px;
+    padding: 25px;
+    max-width: 850px;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 8px;
+    color: #cbd2e7;
+    font-weight: 600;
+}
+
+.form-control {
+    width: 100%;
+    background: #0d1224;
+    border: 1px solid #303753;
+    color: white;
+    border-radius: 10px;
+    padding: 13px;
+    outline: none;
+}
+
+.form-control:focus {
+    border-color: #8b5cf6;
+}
+
+textarea.form-control {
+    min-height: 130px;
+    resize: vertical;
+}
+
+.grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+}
+
+/* WORKSPACE */
+
+.workspace {
+    display: grid;
+    grid-template-columns: 230px 1fr;
+    gap: 20px;
+}
+
+.steps {
+    background: #151a30;
+    border: 1px solid #292f4a;
+    border-radius: 16px;
+    padding: 12px;
+    height: fit-content;
+}
+
+.step {
+    padding: 13px;
+    border-radius: 9px;
+    color: #8e96ad;
+    cursor: pointer;
+    margin-bottom: 5px;
+}
+
+.step:hover {
+    background: #202642;
+    color: white;
+}
+
+.step.active {
+    background: #6d28d9;
+    color: white;
+}
+
+.editor {
+    min-width: 0;
+}
+
+.section {
+    background: #151a30;
+    border: 1px solid #292f4a;
+    border-radius: 18px;
+    padding: 25px;
+    margin-bottom: 20px;
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.section-header h2 {
+    margin: 0;
+}
+
+.section-header p {
+    color: #8992aa;
+}
+
+/* ITEMS */
+
+.item {
+    background: #0e1325;
+    border: 1px solid #29304c;
+    border-radius: 13px;
+    padding: 18px;
+    margin-bottom: 13px;
+}
+
+.item h3 {
+    margin-top: 0;
+}
+
+.item p {
+    color: #adb5c9;
+    line-height: 1.5;
+}
+
+.tag {
+    display: inline-block;
+    padding: 5px 9px;
+    border-radius: 20px;
+    background: #292047;
+    color: #c4b5fd;
+    font-size: 12px;
+    margin: 3px;
+}
+
+/* PANELS */
+
+.panel-grid {
+    display: grid;
+    grid-template-columns:
+        repeat(
+            auto-fit,
+            minmax(280px, 1fr)
+        );
+
+    gap: 18px;
+}
+
+.comic-panel {
+    min-height: 280px;
+    background:
+        linear-gradient(
+            145deg,
+            #f8fafc,
+            #cbd5e1
+        );
+
+    color: #111827;
+    border: 7px solid #111827;
+    border-radius: 4px;
+    padding: 15px;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.panel-number {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    background: #111827;
+    color: white;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+.panel-art {
+    min-height: 130px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    font-weight: 700;
+    font-size: 17px;
+}
+
+.speech {
+    background: white;
+    border: 3px solid #111827;
+    border-radius: 50%;
+    padding: 12px;
+    font-weight: 700;
+    margin-top: 10px;
+}
+
+.caption {
+    background: #fde68a;
+    border: 2px solid #111827;
+    padding: 8px;
+    font-size: 13px;
+}
+
+/* PROJECT LIST */
+
+.project-list {
+    display: grid;
+    grid-template-columns:
+        repeat(
+            auto-fit,
+            minmax(250px, 1fr)
+        );
+
+    gap: 18px;
+}
+
+.project-card {
+    background: #151a30;
+    border: 1px solid #292f4a;
+    border-radius: 16px;
+    padding: 20px;
+}
+
+.project-card h3 {
+    margin-top: 0;
+}
+
+.project-card p {
+    color: #8992aa;
+}
+
+.project-actions {
+    display: flex;
+    gap: 8px;
+}
+
+/* LOADING */
+
+.loading {
+    text-align: center;
+    padding: 30px;
+    color: #a78bfa;
+}
+
+.spinner {
+    display: inline-block;
+    width: 25px;
+    height: 25px;
+    border: 3px solid #333b59;
+    border-top-color: #8b5cf6;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* TOAST */
+
+.toast {
+    position: fixed;
+    bottom: 25px;
+    right: 25px;
+    background: #181e35;
+    border: 1px solid #363e60;
+    padding: 15px 20px;
+    border-radius: 10px;
+    display: none;
+    z-index: 999;
+}
+
+/* MOBILE */
+
+@media(max-width: 850px) {
+
+    .sidebar {
+        position: static;
+        width: 100%;
+        min-height: auto;
+    }
+
+    .app {
+        display: block;
+    }
+
+    .main {
+        margin-left: 0;
+        width: 100%;
+    }
+
+    .workspace {
+        grid-template-columns: 1fr;
+    }
+
+    .grid-2 {
+        grid-template-columns: 1fr;
+    }
+
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="app">
+
+<aside class="sidebar">
+
+    <div class="logo">
+        Comic<span>Craft</span>
+    </div>
+
+    <div class="nav-title">
+        Workspace
+    </div>
+
+    <div class="nav">
+
+        <button
+            onclick="showDashboard()"
+            id="dashboardBtn">
+            🏠 Dashboard
+        </button>
+
+        <button
+            onclick="showNewProject()">
+            ➕ New Comic
+        </button>
+
+        <button
+            onclick="showProjects()">
+            📚 My Projects
+        </button>
+
+    </div>
+
+    <div class="nav-title">
+        AI Workflow
+    </div>
+
+    <div class="nav">
+
+        <button onclick="openStep('story')">
+            ✍️ Story
+        </button>
+
+        <button onclick="openStep('characters')">
+            👤 Characters
+        </button>
+
+        <button onclick="openStep('scenes')">
+            🎬 Scenes
+        </button>
+
+        <button onclick="openStep('panels')">
+            🖼️ Panels
+        </button>
+
+        <button onclick="openStep('dialogue')">
+            💬 Dialogue
+        </button>
+
+        <button onclick="openStep('preview')">
+            📖 Preview
+        </button>
+
+    </div>
+
+</aside>
+
+<main class="main">
+
+    <div id="appContent"></div>
+
+</main>
+
+</div>
+
+<div
+    class="toast"
+    id="toast">
+</div>
+
+<script>
+
+// ============================================================
+// FRONTEND APPLICATION
+// ============================================================
+
+let currentProject = null;
+let currentStep = "story";
+
+// ------------------------------------------------------------
+// HELPERS
+// ------------------------------------------------------------
+
+const $ = id =>
+    document.getElementById(id);
+
+function toast(message) {
+
+    const el = $("toast");
+
+    el.textContent = message;
+    el.style.display = "block";
+
+    setTimeout(() => {
+        el.style.display = "none";
+    }, 2500);
+}
+
+async function api(url, options = {}) {
+
+    const response = await fetch(
+        url,
+        {
+            headers: {
+                "Content-Type":
+                    "application/json"
+            },
+            ...options
+        }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+        throw new Error(
+            data.error || "Request failed"
+        );
+    }
+
+    return data;
+}
+
+// ------------------------------------------------------------
+// DASHBOARD
+// ------------------------------------------------------------
+
+function showDashboard() {
+
+    currentProject = null;
+
+    $("appContent").innerHTML = `
+
+        <div class="header">
+
+            <div>
+                <h1>ComicCraft</h1>
+                <p>
+                    Create your own comic with AI.
+                </p>
+            </div>
+
+            <button
+                class="btn btn-primary"
+                onclick="showNewProject()">
+                + Create Comic
+            </button>
+
+        </div>
+
+        <div class="hero">
+
+            <h2>
+                Turn your idea into a comic.
+            </h2>
+
+            <p>
+                ComicCraft helps you transform a simple
+                story idea into a structured comic.
+                Generate stories, characters, scenes,
+                panels and dialogue with AI.
+            </p>
+
+            <button
+                class="btn btn-primary"
+                onclick="showNewProject()">
+                Start Creating →
+            </button>
+
+        </div>
+
+        <div class="cards">
+
+            <div class="card">
+                <h3>✍️ Story</h3>
+                <p>
+                    Turn your idea into a structured
+                    comic story.
+                </p>
+            </div>
+
+            <div class="card">
+                <h3>👤 Characters</h3>
+                <p>
+                    Create characters with personality,
+                    appearance and background.
+                </p>
+            </div>
+
+            <div class="card">
+                <h3>🎬 Scenes</h3>
+                <p>
+                    Break your story into logical scenes.
+                </p>
+            </div>
+
+            <div class="card">
+                <h3>🖼️ Panels</h3>
+                <p>
+                    Plan each comic panel visually.
+                </p>
+            </div>
+
+            <div class="card">
+                <h3>💬 Dialogue</h3>
+                <p>
+                    Generate natural comic dialogue.
+                </p>
+            </div>
+
+            <div class="card">
+                <h3>📖 Preview</h3>
+                <p>
+                    View your completed comic.
+                </p>
+            </div>
+
+        </div>
+    `;
+}
+
+// ------------------------------------------------------------
+// NEW PROJECT
+// ------------------------------------------------------------
+
+function showNewProject() {
+
+    $("appContent").innerHTML = `
+
+        <div class="header">
+
+            <div>
+                <h1>Create New Comic</h1>
+                <p>
+                    Start with a simple story idea.
+                </p>
+            </div>
+
+        </div>
+
+        <div class="form-card">
+
+            <div class="form-group">
+
+                <label>
+                    Comic Title
+                </label>
+
+                <input
+                    class="form-control"
+                    id="projectTitle"
+                    placeholder="My Amazing Comic">
+
+            </div>
+
+            <div class="grid-2">
+
+                <div class="form-group">
+
+                    <label>
+                        Genre
+                    </label>
+
+                    <select
+                        class="form-control"
+                        id="projectGenre">
+
+                        <option>
+                            Adventure
+                        </option>
+
+                        <option>
+                            Science Fiction
+                        </option>
+
+                        <option>
+                            Fantasy
+                        </option>
+
+                        <option>
+                            Comedy
+                        </option>
+
+                        <option>
+                            Mystery
+                        </option>
+
+                        <option>
+                            Superhero
+                        </option>
+
+                        <option>
+                            Horror
+                        </option>
+
+                        <option>
+                            Romance
+                        </option>
+
+                    </select>
+
+                </div>
+
+                <div class="form-group">
+
+                    <label>
+                        Comic Style
+                    </label>
+
+                    <select
+                        class="form-control"
+                        id="projectStyle">
+
+                        <option>
+                            Modern Comic
+                        </option>
+
+                        <option>
+                            Manga
+                        </option>
+
+                        <option>
+                            Cartoon
+                        </option>
+
+                        <option>
+                            Superhero
+                        </option>
+
+                        <option>
+                            Noir
+                        </option>
+
+                        <option>
+                            Webtoon
+                        </option>
+
+                    </select>
+
+                </div>
+
+            </div>
+
+            <div class="grid-2">
+
+                <div class="form-group">
+
+                    <label>
+                        Story Length
+                    </label>
+
+                    <select
+                        class="form-control"
+                        id="projectLength">
+
+                        <option>
+                            3 pages
+                        </option>
+
+                        <option selected>
+                            5 pages
+                        </option>
+
+                        <option>
+                            8 pages
+                        </option>
+
+                        <option>
+                            10 pages
+                        </option>
+
+                    </select>
+
+                </div>
+
+                <div class="form-group">
+
+                    <label>
+                        Target Audience
+                    </label>
+
+                    <select
+                        class="form-control"
+                        id="audience">
+
+                        <option>
+                            General
+                        </option>
+
+                        <option>
+                            Children
+                        </option>
+
+                        <option>
+                            Teenagers
+                        </option>
+
+                        <option>
+                            Young Adults
+                        </option>
+
+                    </select>
+
+                </div>
+
+            </div>
+
+            <div class="form-group">
+
+                <label>
+                    Story Idea
+                </label>
+
+                <textarea
+                    class="form-control"
+                    id="projectIdea"
+                    placeholder="Example: A student discovers a robot hidden beneath her school.">
+                </textarea>
+
+            </div>
+
+            <button
+                class="btn btn-primary"
+                onclick="createProject()">
+
+                Create Comic Project →
+
+            </button>
+
+        </div>
+    `;
+}
+
+async function createProject() {
+
+    const title =
+        $("projectTitle").value.trim();
+
+    const genre =
+        $("projectGenre").value;
+
+    const style =
+        $("projectStyle").value;
+
+    const length =
+        $("projectLength").value;
+
+    const idea =
+        $("projectIdea").value.trim();
+
+    if (!title || !idea) {
+
+        toast(
+            "Please enter title and story idea."
+        );
+
+        return;
+    }
+
+    try {
+
+        const result =
+            await api(
+                "/api/projects",
+                {
+                    method: "POST",
+                    body: JSON.stringify({
+                        title,
+                        genre,
+                        idea,
+                        style,
+                        length
+                    })
+                }
+            );
+
+        currentProject = {
+            id: result.id,
+            title,
+            genre,
+            idea,
+            style,
+            length,
+            story: "",
+            characters: [],
+            scenes: [],
+            panels: [],
+            dialogue: ""
+        };
+
+        toast("Project created!");
+
+        openWorkspace();
+
+    } catch (error) {
+
+        toast(error.message);
+
+    }
+}
+
+// ------------------------------------------------------------
+// PROJECT LIST
+// ------------------------------------------------------------
+
+async function showProjects() {
+
+    try {
+
+        const projects =
+            await api("/api/projects");
+
+        $("appContent").innerHTML = `
+
+            <div class="header">
+
+                <div>
+                    <h1>My Projects</h1>
+                    <p>
+                        Your saved comic projects.
+                    </p>
+                </div>
+
+                <button
+                    class="btn btn-primary"
+                    onclick="showNewProject()">
+                    + New Comic
+                </button>
+
+            </div>
+
+            <div class="project-list">
+
+                ${
+                    projects.length
+                    ?
+                    projects.map(p => `
+
+                        <div class="project-card">
+
+                            <h3>
+                                ${escapeHtml(p.title)}
+                            </h3>
+
+                            <p>
+                                ${escapeHtml(
+                                    p.genre || ""
+                                )}
+                            </p>
+
+                            <p>
+                                ${escapeHtml(
+                                    p.style || ""
+                                )}
+                            </p>
+
+                            <div class="project-actions">
+
+                                <button
+                                    class="btn btn-primary"
+                                    onclick="
+                                        loadProject(${p.id})
+                                    ">
+                                    Open
+                                </button>
+
+                                <button
+                                    class="btn btn-danger"
+                                    onclick="
+                                        deleteProject(${p.id})
+                                    ">
+                                    Delete
+                                </button>
+
+                            </div>
+
+                        </div>
+
+                    `).join("")
+                    :
+                    `
+                        <div class="card">
+                            <h3>
+                                No projects yet.
+                            </h3>
+
+                            <p>
+                                Create your first comic.
+                            </p>
+
+                            <button
+                                class="btn btn-primary"
+                                onclick="showNewProject()">
+                                Create Comic
+                            </button>
+                        </div>
+                    `
+                }
+
+            </div>
+        `;
+
+    } catch (error) {
+
+        toast(error.message);
+
+    }
+}
+
+async function loadProject(id) {
+
+    try {
+
+        currentProject =
+            await api(
+                "/api/projects/" + id
+            );
+
+        openWorkspace();
+
+    } catch (error) {
+
+        toast(error.message);
+
+    }
+}
+
+async function deleteProject(id) {
+
+    if (!confirm(
+        "Delete this comic project?"
+    )) return;
+
+    try {
+
+        await api(
+            "/api/projects/" + id,
+            {
+                method: "DELETE"
+            }
+        );
+
+        toast("Project deleted.");
+
+        showProjects();
+
+    } catch (error) {
+
+        toast(error.message);
+
+    }
+}
+
+// ------------------------------------------------------------
+// WORKSPACE
+// ------------------------------------------------------------
+
+function openWorkspace() {
+
+    currentStep = "story";
+
+    renderWorkspace();
+
+}
+
+function openStep(step) {
+
+    if (!currentProject) {
+
+        toast(
+            "Create or open a project first."
+        );
+
+        return;
+    }
+
+    currentStep = step;
+
+    renderWorkspace();
+
+}
+
+function renderWorkspace() {
+
+    $("appContent").innerHTML = `
+
+        <div class="header">
+
+            <div>
+
+                <h1>
+                    ${escapeHtml(
+                        currentProject.title
+                    )}
+                </h1>
+
+                <p>
+                    ${escapeHtml(
+                        currentProject.genre
+                    )}
+                    ·
+                    ${escapeHtml(
+                        currentProject.style
+                    )}
+                </p>
+
+            </div>
+
+            <button
+                class="btn btn-success"
+                onclick="saveProject()">
+                💾 Save
+            </button>
+
+        </div>
+
+        <div class="workspace">
+
+            <div class="steps">
+
+                <div
+                    class="step ${
+                        currentStep === "story"
+                        ? "active"
+                        : ""
+                    }"
+                    onclick="openStep('story')">
+                    ✍️ Story
+                </div>
+
+                <div
+                    class="step ${
+                        currentStep === "characters"
+                        ? "active"
+                        : ""
+                    }"
+                    onclick="openStep('characters')">
+                    👤 Characters
+                </div>
+
+                <div
+                    class="step ${
+                        currentStep === "scenes"
+                        ? "active"
+                        : ""
+                    }"
+                    onclick="openStep('scenes')">
+                    🎬 Scenes
+                </div>
+
+                <div
+                    class="step ${
+                        currentStep === "panels"
+                        ? "active"
+                        : ""
+                    }"
+                    onclick="openStep('panels')">
+                    🖼️ Panels
+                </div>
+
+                <div
+                    class="step ${
+                        currentStep === "dialogue"
+                        ? "active"
+                        : ""
+                    }"
+                    onclick="openStep('dialogue')">
+                    💬 Dialogue
+                </div>
+
+                <div
+                    class="step ${
+                        currentStep === "preview"
+                        ? "active"
+                        : ""
+                    }"
+                    onclick="openStep('preview')">
+                    📖 Preview
+                </div>
+
+            </div>
+
+            <div class="editor">
+
+                <div id="workspaceContent">
+                </div>
+
+            </div>
+
+        </div>
+    `;
+
+    renderCurrentStep();
+}
+
+// ------------------------------------------------------------
+// STORY
+// ------------------------------------------------------------
+
+function renderCurrentStep() {
+
+    const el =
+        $("workspaceContent");
+
+    if (currentStep === "story") {
+
+        renderStory(el);
+
+    } else if (
+        currentStep === "characters"
+    ) {
+
+        renderCharacters(el);
+
+    } else if (
+        currentStep === "scenes"
+    ) {
+
+        renderScenes(el);
+
+    } else if (
+        currentStep === "panels"
+    ) {
+
+        renderPanels(el);
+
+    } else if (
+        currentStep === "dialogue"
+    ) {
+
+        renderDialogue(el);
+
+    } else if (
+        currentStep === "preview"
+    ) {
+
+        renderPreview(el);
+
+    }
+
+}
+
+function renderStory(el) {
+
+    const s =
+        currentProject.story || {};
+
+    el.innerHTML = `
+
+        <div class="section">
+
+            <div class="section-header">
+
+                <div>
+                    <h2>Story</h2>
+                    <p>
+                        Generate your comic story with AI.
+                    </p>
+                </div>
+
+                <button
+                    class="btn btn-primary"
+                    onclick="generateStory()">
+                    ✨ Generate Story
+                </button>
+
+            </div>
+
+            <div class="form-group">
+
+                <label>
+                    Story Idea
+                </label>
+
+                <textarea
+                    class="form-control"
+                    id="storyIdea">${escapeHtml(
+                        currentProject.idea || ""
+                    )}</textarea>
+
+            </div>
+
+            ${
+                s.title
+                ?
+                `
+
+                <div class="item">
+
+                    <h3>
+                        ${escapeHtml(s.title)}
+                    </h3>
+
+                    <p>
+                        <strong>Premise:</strong>
+                        ${escapeHtml(s.premise)}
+                    </p>
+
+                    <p>
+                        <strong>Setting:</strong>
+                        ${escapeHtml(s.setting)}
+                    </p>
+
+                    <p>
+                        <strong>Main Conflict:</strong>
+                        ${escapeHtml(s.mainConflict)}
+                    </p>
+
+                    <p>
+                        <strong>Beginning:</strong>
+                        ${escapeHtml(s.beginning)}
+                    </p>
+
+                    <p>
+                        <strong>Middle:</strong>
+                        ${escapeHtml(s.middle)}
+                    </p>
+
+                    <p>
+                        <strong>Ending:</strong>
+                        ${escapeHtml(s.ending)}
+                    </p>
+
+                </div>
+
+                `
+                :
+                `
+                <div class="card">
+                    <h3>
+                        No story generated yet.
+                    </h3>
+
+                    <p>
+                        Click "Generate Story".
+                    </p>
+                </div>
+                `
+            }
+
+        </div>
+    `;
+}
+
+async function generateStory() {
+
+    const idea =
+        $("storyIdea").value.trim();
+
+    if (!idea) {
+
+        toast("Enter a story idea first.");
+
+        return;
+    }
+
+    showLoading();
+
+    try {
+
+        const story =
+            await api(
+                "/api/generate/story",
+                {
+                    method: "POST",
+                    body: JSON.stringify({
+                        idea,
+                        genre:
+                            currentProject.genre,
+                        style:
+                            currentProject.style,
+                        length:
+                            currentProject.length
+                    })
+                }
+            );
+
+        currentProject.story =
+            story;
+
+        currentProject.idea =
+            idea;
+
+        toast("Story generated!");
+
+        renderWorkspace();
+
+    } catch (error) {
+
+        showError(error);
+
+    }
+
+}
+
+// ------------------------------------------------------------
+// CHARACTERS
+// ------------------------------------------------------------
+
+function renderCharacters(el) {
+
+    const characters =
+        currentProject.characters || [];
+
+    el.innerHTML = `
+
+        <div class="section">
+
+            <div class="section-header">
+
+                <div>
+                    <h2>Characters</h2>
+                    <p>
+                        Create the characters in your comic.
+                    </p>
+                </div>
+
+                <button
+                    class="btn btn-primary"
+                    onclick="generateCharacters()">
+                    ✨ Generate Characters
+                </button>
+
+            </div>
+
+            ${
+                characters.length
+                ?
+                characters.map(
+                    (c, i) => `
+
+                    <div class="item">
+
+                        <h3>
+                            ${escapeHtml(c.name)}
+                        </h3>
+
+                        <span class="tag">
+                            ${escapeHtml(c.role)}
+                        </span>
+
+                        <span class="tag">
+                            Age:
+                            ${escapeHtml(c.age)}
+                        </span>
+
+                        <p>
+                            <strong>Appearance:</strong>
+                            ${escapeHtml(c.appearance)}
+                        </p>
+
+                        <p>
+                            <strong>Personality:</strong>
+                            ${escapeHtml(c.personality)}
+                        </p>
+
+                        <p>
+                            <strong>Background:</strong>
+                            ${escapeHtml(c.background)}
+                        </p>
+
+                        <p>
+                            <strong>Relationships:</strong>
+                            ${escapeHtml(c.relationships)}
+                        </p>
+
+                    </div>
+
+                `
+                ).join("")
+                :
+                `
+                    <div class="card">
+                        <h3>
+                            No characters yet.
+                        </h3>
+
+                        <p>
+                            Generate characters based
+                            on your story.
+                        </p>
+                    </div>
+                `
+            }
+
+        </div>
+    `;
+}
+
+async function generateCharacters() {
+
+    if (!currentProject.story) {
+
+        toast(
+            "Generate the story first."
+        );
+
+        return;
+    }
+
+    showLoading();
+
+    try {
+
+        const characters =
+            await api(
+                "/api/generate/characters",
+                {
+                    method: "POST",
+                    body: JSON.stringify({
+                        story:
+                            currentProject.story,
+                        genre:
+                            currentProject.genre
+                    })
+                }
+            );
+
+        currentProject.characters =
+            characters;
+
+        toast(
+            "Characters generated!"
+        );
+
+        renderWorkspace();
+
+    } catch (error) {
+
+        showError(error);
+
+    }
+}
+
+// ------------------------------------------------------------
+// SCENES
+// ------------------------------------------------------------
+
+function renderScenes(el) {
+
+    const scenes =
+        currentProject.scenes || [];
+
+    el.innerHTML = `
+
+        <div class="section">
+
+            <div class="section-header">
+
+                <div>
+                    <h2>Scenes</h2>
+                    <p>
+                        Divide your story into scenes.
+                    </p>
+                </div>
+
+                <button
+                    class="btn btn-primary"
+                    onclick="generateScenes()">
+                    ✨ Generate Scenes
+                </button>
+
+            </div>
+
+            ${
+                scenes.length
+                ?
+                scenes.map(
+                    s => `
+
+                    <div class="item">
+
+                        <h3>
+                            Scene ${escapeHtml(
+                                s.number
+                            )}
+                        </h3>
+
+                        <span class="tag">
+                            📍
+                            ${escapeHtml(
+                                s.location
+                            )}
+                        </span>
+
+                        <span class="tag">
+                            Mood:
+                            ${escapeHtml(
+                                s.mood
+                            )}
+                        </span>
+
+                        <p>
+                            <strong>Characters:</strong>
+                            ${escapeHtml(
+                                Array.isArray(
+                                    s.characters
+                                )
+                                ?
+                                s.characters.join(", ")
+                                :
+                                s.characters
+                            )}
+                        </p>
+
+                        <p>
+                            <strong>Action:</strong>
+                            ${escapeHtml(
+                                s.action
+                            )}
+                        </p>
+
+                        <p>
+                            <strong>Purpose:</strong>
+                            ${escapeHtml(
+                                s.purpose
+                            )}
+                        </p>
+
+                        <p>
+                            ${escapeHtml(
+                                s.description
+                            )}
+                        </p>
+
+                    </div>
+
+                `
+                ).join("")
+                :
+                `
+                    <div class="card">
+                        <h3>
+                            No scenes yet.
+                        </h3>
+                    </div>
+                `
+            }
+
+        </div>
+    `;
+}
+
+async function generateScenes() {
+
+    if (!currentProject.story) {
+
+        toast(
+            "Generate the story first."
+        );
+
+        return;
+    }
+
+    if (
+        !currentProject.characters ||
+        !currentProject.characters.length
+    ) {
+
+        toast(
+            "Generate characters first."
+        );
+
+        return;
+    }
+
+    showLoading();
+
+    try {
+
+        const scenes =
+            await api(
+                "/api/generate/scenes",
+                {
+                    method: "POST",
+                    body: JSON.stringify({
+                        story:
+                            currentProject.story,
+                        characters:
+                            currentProject.characters,
+                        length:
+                            currentProject.length
+                    })
+                }
+            );
+
+        currentProject.scenes =
+            scenes;
+
+        toast("Scenes generated!");
+
+        renderWorkspace();
+
+    } catch (error) {
+
+        showError(error);
+
+    }
+}
+
+// ------------------------------------------------------------
+// PANELS
+// ------------------------------------------------------------
+
+function renderPanels(el) {
+
+    const panels =
+        currentProject.panels || [];
+
+    el.innerHTML = `
+
+        <div class="section">
+
+            <div class="section-header">
+
+                <div>
+                    <h2>Comic Panels</h2>
+                    <p>
+                        Plan the visual layout of your comic.
+                    </p>
+                </div>
+
+                <button
+                    class="btn btn-primary"
+                    onclick="generatePanels()">
+                    ✨ Generate Panels
+                </button>
+
+            </div>
+
+            ${
+                panels.length
+                ?
+                `
+                <div class="panel-grid">
+
+                ${
+                    panels.map(
+                        p => `
+
+                        <div class="comic-panel">
+
+                            <div
+                                class="panel-number">
+                                Panel
+                                ${escapeHtml(
+                                    p.number
+                                )}
+                            </div>
+
+                            <div
+                                class="panel-art">
+
+                                <div>
+
+                                    <div>
+                                        🎨
+                                    </div>
+
+                                    <p>
+                                        ${escapeHtml(
+                                            p.visualDescription
+                                        )}
+                                    </p>
+
+                                    <small>
+                                        Camera:
+                                        ${escapeHtml(
+                                            p.camera
+                                        )}
+                                    </small>
+
+                                </div>
+
+                            </div>
+
+                            ${
+                                p.caption
+                                ?
+                                `
+                                <div class="caption">
+                                    ${escapeHtml(
+                                        p.caption
+                                    )}
+                                </div>
+                                `
+                                :
+                                ""
+                            }
+
+                            ${
+                                p.dialogue
+                                ?
+                                `
+                                <div class="speech">
+                                    ${escapeHtml(
+                                        p.dialogue
+                                    )}
+                                </div>
+                                `
+                                :
+                                ""
+                            }
+
+                        </div>
+
+                    `
+                    ).join("")
+                }
+
+                </div>
+                `
+                :
+                `
+                <div class="card">
+                    <h3>
+                        No panels yet.
+                    </h3>
+                </div>
+                `
+            }
+
+        </div>
+    `;
+}
+
+async function generatePanels() {
+
+    if (
+        !currentProject.scenes ||
+        !currentProject.scenes.length
+    ) {
+
+        toast(
+            "Generate scenes first."
+        );
+
+        return;
+    }
+
+    showLoading();
+
+    try {
+
+        const panels =
+            await api(
+                "/api/generate/panels",
+                {
+                    method: "POST",
+                    body: JSON.stringify({
+                        story:
+                            currentProject.story,
+                        characters:
+                            currentProject.characters,
+                        scenes:
+                            currentProject.scenes,
+                        style:
+                            currentProject.style
+                    })
+                }
+            );
+
+        currentProject.panels =
+            panels;
+
+        toast("Panels generated!");
+
+        renderWorkspace();
+
+    } catch (error) {
+
+        showError(error);
+
+    }
+}
+
+// ------------------------------------------------------------
+// DIALOGUE
+// ------------------------------------------------------------
+
+function renderDialogue(el) {
+
+    const d =
+        currentProject.dialogue;
+
+    el.innerHTML = `
+
+        <div class="section">
+
+            <div class="section-header">
+
+                <div>
+                    <h2>Dialogue</h2>
+                    <p>
+                        Generate dialogue for your comic.
+                    </p>
+                </div>
+
+                <button
+                    class="btn btn-primary"
+                    onclick="generateDialogue()">
+                    ✨ Generate Dialogue
+                </button>
+
+            </div>
+
+            ${
+                d && d.dialogue
+                ?
+                d.dialogue.map(
+                    item => `
+
+                    <div class="item">
+
+                        <span class="tag">
+                            Panel
+                            ${escapeHtml(
+                                item.panel
+                            )}
+                        </span>
+
+                        <h3>
+                            ${escapeHtml(
+                                item.speaker
+                            )}
+                        </h3>
+
+                        <p>
+                            "${escapeHtml(
+                                item.text
+                            )}"
+                        </p>
+
+                    </div>
+
+                `
+                ).join("")
+                :
+                `
+                <div class="card">
+
+                    <h3>
+                        No dialogue yet.
+                    </h3>
+
+                    <p>
+                        Generate dialogue after
+                        creating panels.
+                    </p>
+
+                </div>
+                `
+            }
+
+        </div>
+    `;
+}
+
+async function generateDialogue() {
+
+    if (
+        !currentProject.panels ||
+        !currentProject.panels.length
+    ) {
+
+        toast(
+            "Generate panels first."
+        );
+
+        return;
+    }
+
+    showLoading();
+
+    try {
+
+        const dialogue =
+            await api(
+                "/api/generate/dialogue",
+                {
+                    method: "POST",
+                    body: JSON.stringify({
+                        story:
+                            currentProject.story,
+                        characters:
+                            currentProject.characters,
+                        scenes:
+                            currentProject.scenes,
+                        panels:
+                            currentProject.panels
+                    })
+                }
+            );
+
+        currentProject.dialogue =
+            dialogue;
+
+        toast(
+            "Dialogue generated!"
+        );
+
+        renderWorkspace();
+
+    } catch (error) {
+
+        showError(error);
+
+    }
+}
+
+// ------------------------------------------------------------
+// PREVIEW
+// ------------------------------------------------------------
+
+function renderPreview(el) {
+
+    const panels =
+        currentProject.panels || [];
+
+    const dialogue =
+        currentProject.dialogue &&
+        currentProject.dialogue.dialogue
+        ?
+        currentProject.dialogue.dialogue
+        :
+        [];
+
+    el.innerHTML = `
+
+        <div class="section">
+
+            <div class="section-header">
+
+                <div>
+                    <h2>
+                        ${escapeHtml(
+                            currentProject.story?.title ||
+                            currentProject.title
+                        )}
+                    </h2>
+
+                    <p>
+                        Comic Preview
+                    </p>
+                </div>
+
+                <button
+                    class="btn btn-secondary"
+                    onclick="window.print()">
+                    🖨️ Print / Save PDF
+                </button>
+
+            </div>
+
+            ${
+                panels.length
+                ?
+                `
+                <div class="panel-grid">
+
+                ${
+                    panels.map(
+                        p => {
+
+                            const speech =
+                                dialogue.find(
+                                    d =>
+                                    Number(d.panel) ===
+                                    Number(p.number)
+                                );
+
+                            return `
+
+                            <div
+                                class="comic-panel">
+
+                                <div
+                                    class="panel-number">
+
+                                    ${escapeHtml(
+                                        p.number
+                                    )}
+
+                                </div>
+
+                                <div
+                                    class="panel-art">
+
+                                    <div>
+
+                                        <div
+                                            style="
+                                            font-size:45px;
+                                            margin-bottom:15px;
+                                            ">
+                                            🎨
+                                        </div>
+
+                                        ${escapeHtml(
+                                            p.visualDescription
+                                        )}
+
+                                        <br><br>
+
+                                        <small>
+                                            ${escapeHtml(
+                                                p.background
+                                            )}
+                                        </small>
+
+                                    </div>
+
+                                </div>
+
+                                ${
+                                    p.caption
+                                    ?
+                                    `
+                                    <div class="caption">
+                                        ${escapeHtml(
+                                            p.caption
+                                        )}
+                                    </div>
+                                    `
+                                    :
+                                    ""
+                                }
+
+                                ${
+                                    speech
+                                    ?
+                                    `
+                                    <div class="speech">
+                                        <strong>
+                                            ${escapeHtml(
+                                                speech.speaker
+                                            )}
+                                        </strong>
+                                        :
+                                        ${escapeHtml(
+                                            speech.text
+                                        )}
+                                    </div>
+                                    `
+                                    :
+                                    p.dialogue
+                                    ?
+                                    `
+                                    <div class="speech">
+                                        ${escapeHtml(
+                                            p.dialogue
+                                        )}
+                                    </div>
+                                    `
+                                    :
+                                    ""
+                                }
+
+                            </div>
+
+                            `;
+                        }
+                    ).join("")
+                }
+
+                </div>
+                `
+                :
+                `
+                <div class="card">
+
+                    <h3>
+                        Your comic is empty.
+                    </h3>
+
+                    <p>
+                        Generate panels to see
+                        the comic preview.
+                    </p>
+
+                </div>
+                `
+            }
+
+        </div>
+    `;
+}
+
+// ------------------------------------------------------------
+// SAVE
+// ------------------------------------------------------------
+
+async function saveProject() {
+
+    if (!currentProject) return;
+
+    try {
+
+        await api(
+            "/api/projects/" +
+            currentProject.id,
+            {
+                method: "PUT",
+
+                body: JSON.stringify(
+                    currentProject
+                )
+            }
+        );
+
+        toast(
+            "Project saved successfully!"
+        );
+
+    } catch (error) {
+
+        toast(error.message);
+
+    }
+}
+
+// ------------------------------------------------------------
+// LOADING
+// ------------------------------------------------------------
+
+function showLoading() {
+
+    $("workspaceContent").innerHTML = `
+
+        <div class="section">
+
+            <div class="loading">
+
+                <div class="spinner"></div>
+
+                <p>
+                    Gemini AI is creating your content...
+                </p>
+
+            </div>
+
+        </div>
+
+    `;
+}
+
+function showError(error) {
+
+    $("workspaceContent").innerHTML = `
+
+        <div class="section">
+
+            <div class="card">
+
+                <h3>
+                    ⚠️ Something went wrong
+                </h3>
+
+                <p>
+                    ${escapeHtml(
+                        error.message
+                    )}
+                </p>
+
+                <button
+                    class="btn btn-secondary"
+                    onclick="renderWorkspace()">
+                    Try Again
+                </button>
+
+            </div>
+
+        </div>
+
+    `;
+}
+
+// ------------------------------------------------------------
+// SECURITY / HTML ESCAPE
+// ------------------------------------------------------------
+
+function escapeHtml(value) {
+
+    if (
+        value === null ||
+        value === undefined
+    ) {
+        return "";
+    }
+
+    return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+}
+
+// ------------------------------------------------------------
+// START
+// ------------------------------------------------------------
+
+showDashboard();
+
+</script>
+
+</body>
+
+</html>
+    `);
+
+});
+
+// ------------------------------------------------------------
+// START SERVER
+// ------------------------------------------------------------
+
+app.listen(PORT, () => {
+
+    console.log("");
+    console.log("======================================");
+    console.log("        COMICCRAFT IS RUNNING");
+    console.log("======================================");
+    console.log("");
+    console.log(
+        "Open: http://localhost:" + PORT
+    );
+    console.log("");
+    console.log(
+        "Gemini AI:",
+        process.env.GEMINI_API_KEY
+            ? "Configured"
+            : "NOT CONFIGURED"
+    );
+    console.log("");
+
+});
